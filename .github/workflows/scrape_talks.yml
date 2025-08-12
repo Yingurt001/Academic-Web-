@@ -9,23 +9,21 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # 允许 Actions 写入仓库内容
+  contents: write
 
 concurrency:
   group: scrape-talks-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}   # ✅ 用带写权限的 token
-          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0              # ✅ 允许后面做 rebase
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -43,41 +41,28 @@ jobs:
         run: |
           jupyter nbconvert --to notebook --execute talkmap.ipynb --output talkmap_out.ipynb
 
-      - name: Configure git author
+      - name: Git config & auth
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Stage changes (if any)
-        run: |
-          git add -A
-          # 如果没有变化就提前退出（返回 0，避免失败）
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-            echo "skip_push=true" >> $GITHUB_ENV
-          else
-            echo "skip_push=false" >> $GITHUB_ENV
-          fi
-      - name: Sync with remote (rebase)
-        run: |
-          git fetch origin
-          # ${{ github.ref_name }} 一般是 master 或 main
-          git rebase origin/${{ github.ref_name }} || git rebase --abort
-
-        
-      - name: Commit changes
-        if: env.skip_push == 'false'
-        run: |
-          git commit -m "Automated update of talk locations"
-
-      - name: Set remote URL with token (force https auth)
-        if: env.skip_push == 'false'
-        run: |
-          # 显式把 origin 改成带 token 的地址，避免 403
+          # ✅ 确保 origin 用带 token 的地址
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
-      - name: Push
-        if: env.skip_push == 'false'
+      - name: Sync with remote (rebase to avoid non-FF)
         run: |
-          # 推送到触发工作流的分支（如 master/main/其他）
+          git fetch origin ${{ github.ref_name }}
+          # 如果落后远端，则 rebase；无差异则跳过
+          if ! git diff --quiet HEAD origin/${{ github.ref_name }}; then
+            git rebase origin/${{ github.ref_name }}
+          fi
+
+      - name: Stage & commit (if any)
+        run: |
+          git add -A
+          git commit -m "Automated update of talk locations" || echo "No changes" && echo "skip_push=true" >> $GITHUB_ENV
+
+      - name: Push
+        if: env.skip_push != 'true'
+        run: |
+          # 正常推送；若你的分支保护允许，也可改为 --force-with-lease
           git push origin ${{ github.ref_name }}

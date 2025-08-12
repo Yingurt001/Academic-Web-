@@ -58,7 +58,13 @@ jobs:
           else
             echo "skip_push=false" >> $GITHUB_ENV
           fi
+      - name: Sync with remote (rebase)
+        run: |
+          git fetch origin
+          # ${{ github.ref_name }} 一般是 master 或 main
+          git rebase origin/${{ github.ref_name }} || git rebase --abort
 
+        
       - name: Commit changes
         if: env.skip_push == 'false'
         run: |

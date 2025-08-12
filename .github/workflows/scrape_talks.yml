@@ -20,22 +20,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0              # ✅ 允许后面做 rebase
+          fetch-depth: 0            # ✅ 必须为 0，才能 rebase
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v2
         with:
           python-version: '3.9'
-          cache: 'pip'
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
+          pip install -U pip
           pip install jupyter pandas requests beautifulsoup4 geopy
-          pip install --upgrade getorg
+          pip install -U getorg
 
       - name: Run Jupyter Notebook
         run: |
@@ -45,24 +44,25 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # ✅ 确保 origin 用带 token 的地址
+          # ✅ 确保 remote 用带 token 的 URL
           git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
 
       - name: Sync with remote (rebase to avoid non-FF)
         run: |
           git fetch origin ${{ github.ref_name }}
-          # 如果落后远端，则 rebase；无差异则跳过
+          # 如果落后就 rebase；冲突则放弃并用 pull --rebase 兜底
           if ! git diff --quiet HEAD origin/${{ github.ref_name }}; then
-            git rebase origin/${{ github.ref_name }}
+            git rebase origin/${{ github.ref_name }} || (git rebase --abort && git pull --rebase origin ${{ github.ref_name }})
           fi
 
-      - name: Stage & commit (if any)
+      - name: Commit changes (if any)
         run: |
           git add -A
-          git commit -m "Automated update of talk locations" || echo "No changes" && echo "skip_push=true" >> $GITHUB_ENV
+          git commit -m "Automated update of talk locations" || { echo "skip_push=true" >> $GITHUB_ENV; }
 
       - name: Push
         if: env.skip_push != 'true'
         run: |
-          # 正常推送；若你的分支保护允许，也可改为 --force-with-lease
           git push origin ${{ github.ref_name }}
+          # 如果偶发竞态仍被拒，可改为下面一行（确认分支保护允许）：
+          # git push --force-with-lease origin ${{ github.ref_name }}

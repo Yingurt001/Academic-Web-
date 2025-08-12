@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  # 关键：允许 Actions 写入仓库内容
+  contents: write  # 允许 Actions 写入仓库内容
 
 jobs:
   build:
@@ -17,15 +17,17 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}  # ✅ 关键：用带权限的 token
 
     - name: Set up Python
       uses: actions/setup-python@v2
       with:
-        python-version: '3.9'  # 你需要的 Python 版本
+        python-version: '3.9'
 
     - name: Install dependencies
       run: |
-        pip install jupyter pandas requests beautifulsoup4 geopy  # 你的依赖
+        pip install jupyter pandas requests beautifulsoup4 geopy
         pip install getorg --upgrade
 
     - name: Run Jupyter Notebook
@@ -33,8 +35,6 @@ jobs:
         jupyter nbconvert --to notebook --execute talkmap.ipynb --output talkmap_out.ipynb
 
     - name: Commit changes
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # 确保 push 使用内置 token
       run: |
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"

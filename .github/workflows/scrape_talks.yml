@@ -11,33 +11,66 @@ on:
 permissions:
   contents: write  # 允许 Actions 写入仓库内容
 
+concurrency:
+  group: scrape-talks-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}  # ✅ 关键：用带权限的 token
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}   # ✅ 用带写权限的 token
+          fetch-depth: 0
 
-    - name: Set up Python
-      uses: actions/setup-python@v2
-      with:
-        python-version: '3.9'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+          cache: 'pip'
 
-    - name: Install dependencies
-      run: |
-        pip install jupyter pandas requests beautifulsoup4 geopy
-        pip install getorg --upgrade
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install jupyter pandas requests beautifulsoup4 geopy
+          pip install --upgrade getorg
 
-    - name: Run Jupyter Notebook
-      run: |
-        jupyter nbconvert --to notebook --execute talkmap.ipynb --output talkmap_out.ipynb
+      - name: Run Jupyter Notebook
+        run: |
+          jupyter nbconvert --to notebook --execute talkmap.ipynb --output talkmap_out.ipynb
 
-    - name: Commit changes
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "github-actions[bot]@users.noreply.github.com"
-        git add .
-        git commit -m "Automated update of talk locations" || echo "No changes to commit"
-        git push
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Stage changes (if any)
+        run: |
+          git add -A
+          # 如果没有变化就提前退出（返回 0，避免失败）
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            echo "skip_push=true" >> $GITHUB_ENV
+          else
+            echo "skip_push=false" >> $GITHUB_ENV
+          fi
+
+      - name: Commit changes
+        if: env.skip_push == 'false'
+        run: |
+          git commit -m "Automated update of talk locations"
+
+      - name: Set remote URL with token (force https auth)
+        if: env.skip_push == 'false'
+        run: |
+          # 显式把 origin 改成带 token 的地址，避免 403
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+      - name: Push
+        if: env.skip_push == 'false'
+        run: |
+          # 推送到触发工作流的分支（如 master/main/其他）
+          git push origin ${{ github.ref_name }}
